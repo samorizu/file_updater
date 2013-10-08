@@ -2,11 +2,6 @@
 #Authors: Jackson Sadowski and Luke Matarazzo
 #Purpose: Grab files via SFTP or FTP, update them the way the user defines, and reupload them
 
-if [ $# -lt 1 ]; then
-  echo "Usage: ./update.sh [CONFIGFILE]"
-  exit 1
-fi
-
 if [ $1 = "--help" ]; then
   echo "Printing help information"
   echo "CONFIGFILE - Text file containing each file on the remote FTP server that needs to be updated. Each file should be on a separate line."
@@ -14,7 +9,18 @@ if [ $1 = "--help" ]; then
   exit 0
 fi
 
+if [ $# -lt 2 ]; then
+  echo "Usage: ./update.sh [CONFIGFILE] [DIRECTORY_OF_FILES]"
+  exit 1
+fi
 
+files=`ls $2`
+
+for file in $files; do
+	#echo "$2/$file";
+	#cp $2/$file $2/$file.bak
+	./manipulator.pl $1 < $2/$file > $file
+done
 
 #setting the config file to a variable
 #file=$1
