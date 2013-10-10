@@ -1,6 +1,7 @@
 #!/usr/bin/perl -w
 #author: Luke Matarazzo
 #file_updater perl script
+#filename: manipulator.pl
 use strict;
 
 my @page = <STDIN>;
@@ -21,6 +22,8 @@ foreach (@temp){
 		push(@change, $_);
 	}
 }
+
+my $difference = scalar @change - scalar @orig;
 
 my $start = $#page + 1;
 my $end = 0;
@@ -44,11 +47,20 @@ if($start == $#page + 1){
 	exit 1;
 }
 
-for(my $i = $start; $i <= $end; $i++){
-	$page[$i] = $change[$i - $start];
+if($difference == 0){
+	for(my $i = $start; $i <= $end; $i++){
+		$page[$i] = $change[$i - $start];
+	}
+} elsif($difference < 0){
+	for(my $i = $start; $i <= $end + $difference; $i++){
+		$page[$i] = $change[$i - $start];
+	}
+	splice(@page, $end, $difference * -1);
+} else{
+	splice(@page, $start, scalar @orig);
+	splice(@page, $end, 0, @change);
 }
 
 foreach (@page){
 	print "$_\n";
 }
-
