@@ -17,6 +17,10 @@ if [ $# -lt 2 ]; then
   exit 1
 fi
 
+path=`pwd`
+ftp_out_file="$path/.file_updater_ftp_output.log"
+ftp_error_file="$path/.file_updater_ftp_error.log"
+
 for param in $@; do
 	if [ ${param:0:1} == "-" ]; then
 		ftp_option=${param:1:1}
@@ -43,16 +47,16 @@ read -p "FTP user: " user
 read -s -p "FTP password: " pass
 
 #Uses the ftp command with the -inv switches. -i turns off interactive prompting. -n Restrains FTP from attempting the auto-login feature. -v enables verbose and progress.
-$protocol -inv $host <<EOF
+$protocol -inv $host <<EOF >$ftp_out_file 2>$ftp_error_file
 user $user $pass
 cd testing
 mget *.asp
 bye
 EOF
-#exit 0
+exit 0
+echo "get here"
 
 cd ..
-path=`pwd`
 files=`ls $2`
 num_files=0
 
@@ -60,20 +64,18 @@ for file in $files; do
 	cp $2/$file $2/$file.bak
 	$path/manipulator.pl $1 < $2/$file > $2/$file.new
 	result=`cat $2/$file.new`
-	#echo "result: '$result'"
 	if [ "$result" != "" ]; then
 		num_files=$num_files+1
 		rm $2/$file
 		mv $2/$file.new $2/$file
 	else
-		#echo "in the else"
 		rm $2/$file.new
 		mv $2/$file.bak $2/$file
 	fi
 done
 
 cd $2
-$protocol -inv $host <<EOF
+$protocol -inv $host <<EOF >> $ftp_out_file 2>>ftp_error_file
 user $user $pass
 cd testing
 mput *.asp
@@ -81,7 +83,12 @@ bye
 EOF
 cd ..
 
-echo "All eligible files were uploaded successfully."
+if [ $num_files -gt 0 ]; then
+	echo "All eligible files were uploaded successfully."
+else
+	echo "No files were copied. Maybe none of them met the criterion." 1>&2
+	exit 1
+fi
 read -p "Would you like to revert all or some files (A/S/N): " choice
 choice=`echo $choice | tr '[:lower:]' '[:upper:]'`
 if [ "$choice" = "A" -o "$choice" = "ALL" ]; then
@@ -102,3 +109,16 @@ elif [ "$choice" = "S" -o "$choice" = "SOME" ]; then
 	done
 fi
 
+cd $2
+files=`echo *.rev`
+for file in $files; do
+	$protocol -inv $host <<EOF
+	user $user $pass
+	cd testing
+	put $file ${file:0:${#file}-4}
+	bye
+EOF
+done >> $ftp_out_file 2>>ftp_error_file
+cd ..
+
+echo "All reverted files uploaded successfully."
