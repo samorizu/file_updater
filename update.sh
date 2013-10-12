@@ -12,14 +12,46 @@ if [ $1 = "--help" ]; then
 	exit 0
 fi
 
-if [ $# -lt 2 ]; then
-  echo "Usage: ./update.sh [options] [CONFIGFILE] [DIRECTORY_OF_FILES] [options]"
+if [ $# -lt 1 ]; then
+  echo "Usage: ./update.sh [CONFIGFILE] [options]"
   exit 1
 fi
 
 path=`pwd`
 ftp_out_file="$path/.file_updater_ftp_output.log"
 ftp_error_file="$path/.file_updater_ftp_error.log"
+declare -A conf_values
+files_wanted=0
+temp=""
+
+while read line; do
+	if [ "${line:0:1}" == "#" -o "${line:0:1}" == "" ]; then
+		continue;
+	fi
+	key=`echo $line | awk -F"=" '{print $1}'`
+	val=`echo $line | awk -F"=" '{print $2}'`
+	if [ "$key" == "files" ]; then
+		((files_wanted++))
+		#conf_values=([$key$files_wanted]="$val")
+		conf_values[$key$files_wanted]="$val"
+		#echo "${conf_values[$key$files_wanted]}"
+	else
+		temp="$key"
+		#conf_values=([$key]="$val")
+		conf_values[$key]="$val"
+		#echo "${conf_values[$key]}"
+	fi
+done < $1
+
+echo "files wanted: $files_wanted"
+echo "value of local_directory: ${conf_values[local_directory]}"
+
+#echo "${!address[*]}"   # The array indices ...
+for key in ${!conf_values[*]}; do
+	echo "value for $key: ${conf_values[$key]}"
+done
+
+exit 0
 
 for param in $@; do
 	if [ ${param:0:1} == "-" ]; then
@@ -27,14 +59,6 @@ for param in $@; do
 		break
 	fi
 done
-
-if [ "$ftp_option" == "f" ]; then
-	protocol=ftp
-elif [ "$ftp_option" == "s" ]; then
-	protocol=ftps
-else
-	protocol=sftp
-fi
 
 if test ! -d $2; then
 	mkdir $2
@@ -45,6 +69,18 @@ cd $2
 read -p "FTP host (example ftp.server.com): " host
 read -p "FTP user: " user
 read -s -p "FTP password: " pass
+
+if [ "$ftp_option" == "f" ]; then
+	protocol=ftp
+elif [ "$ftp_option" == "s" ]; then
+	protocol=ftps
+else
+	export SSHPASS=$pass
+	sshpass -e sftp -oBatchMode=no -b - $user@$host << !
+	   put file.txt
+	   bye
+!
+fi
 
 #Uses the ftp command with the -inv switches. -i turns off interactive prompting. -n Restrains FTP from attempting the auto-login feature. -v enables verbose and progress.
 $protocol -inv $host <<EOF >$ftp_out_file 2>$ftp_error_file
