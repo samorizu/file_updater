@@ -2,7 +2,7 @@
 #Authors: Jackson Sadowski and Luke Matarazzo
 #Purpose: Grab files via SFTP or FTP, update them the way the user defines, and reupload them
 
-if [ $1 = "--help" ]; then
+if [ "$1" == "--help" -o "$1" == "-h" ]; then
 	echo "Printing help information"
 	echo "CONFIGFILE - File with the text to be found, a tilde (~) on a line by itself and then the changes (temporary)."
 	#echo "CONFIGFILE - Text file containing each file on the remote FTP server that needs to be updated. Each file should be on a separate line."
@@ -17,13 +17,28 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
+# isIn(){
+# 	for $temp in $1; do
+# 		if [ "$temp" == "$2" ]; then
+# 			return 1
+# 		fi
+# 	done
+# 	return 0
+# }
+
 path=`pwd`
 ftp_out_file="$path/.file_updater_ftp_output.log"
 ftp_error_file="$path/.file_updater_ftp_error.log"
 declare -A conf_values
+#remote directory: ${conf_values['remote_directory']}
+#local directory: ${conf_values['local_directory']}
+#file: ${conf_values["file$i"]}
+#files: ${conf_values["files$i"]}
 files_wanted=0
+file_wanted=0
 temp=""
 
+#read in and process config file data
 while read line; do
 	if [ "${line:0:1}" == "#" -o "${line:0:1}" == "" ]; then
 		continue;
@@ -35,6 +50,9 @@ while read line; do
 		#conf_values=([$key$files_wanted]="$val")
 		conf_values[$key$files_wanted]="$val"
 		#echo "${conf_values[$key$files_wanted]}"
+	elif [ "$key" == "file" ]; then
+		((file_wanted++))
+		conf_values[$key$file_wanted]="$val"
 	else
 		temp="$key"
 		#conf_values=([$key]="$val")
@@ -46,12 +64,13 @@ done < $1
 echo "files wanted: $files_wanted"
 echo "value of local_directory: ${conf_values[local_directory]}"
 
-#echo "${!address[*]}"   # The array indices ...
+#declare -a myKeys
 for key in ${!conf_values[*]}; do
+	#myKeys=("$myKeys" "$key")
 	echo "value for $key: ${conf_values[$key]}"
 done
 
-exit 0
+#exit 0
 
 for param in $@; do
 	if [ ${param:0:1} == "-" ]; then
@@ -60,46 +79,77 @@ for param in $@; do
 	fi
 done
 
-if test ! -d $2; then
-	mkdir $2
+if test ! -d ${conf_values['local_directory']}; then
+	mkdir ${conf_values['local_directory']}
 fi
 
-cd $2
+cd ${conf_values['local_directory']}
 
 read -p "FTP host (example ftp.server.com): " host
 read -p "FTP user: " user
 read -s -p "FTP password: " pass
+echo #get a newline after printing ftp password prompt
 
-if [ "$ftp_option" == "f" ]; then
-	protocol=ftp
-elif [ "$ftp_option" == "s" ]; then
-	protocol=ftps
-else
-	export SSHPASS=$pass
-	sshpass -e sftp -oBatchMode=no -b - $user@$host << !
-	   put file.txt
-	   bye
-!
+#get the files we want to get into two separate strings
+files=""
+file=""
+for (( i = 1; i <= $files_wanted; i++ )); do
+	files+="${conf_values["files$i"]} "
+	#echo "files: ${conf_values["files$i"]}"
+done
+#echo "files: '$files'"
+for (( i = 1; i <= $file_wanted; i++ )); do
+	file+="${conf_values["file$i"]} "
+	#echo "file: ${conf_values["file$i"]}"
+done
+#echo "file: '$file'"
+
+if [ "$files" == "" -a "$file" == "" ]; then
+	echo "You have not entered any files you want to download"
+	exit 1
 fi
 
-#Uses the ftp command with the -inv switches. -i turns off interactive prompting. -n Restrains FTP from attempting the auto-login feature. -v enables verbose and progress.
-$protocol -inv $host <<EOF >$ftp_out_file 2>$ftp_error_file
+if [ "$ftp_option" == "f" ]; then
+	ftp -inv $host <<EOF >$ftp_out_file 2>$ftp_error_file
 user $user $pass
-cd testing
-mget *.asp
+cd ${conf_values['remote_directory']}
+mget $files $file
 bye
 EOF
-exit 0
-echo "get here"
+else
+	echo "sftp not yet implemented"
+# 	sftp -inv $host <<EOF >>$ftp_out_file 2>>$ftp_error_file
+# user $user $pass
+# cd ${conf_values['remote_directory']}
+# mget $files $file
+# bye
+# EOF
+fi
 
-cd ..
-files=`ls $2`
+loginFail=`grep -i "Login failed" $ftp_out_file`
+error=$loginFail
+connectionFail=`grep -i "connection timed out" $ftp_error_file`
+
+if [ "$connectionFail" != "" ]; then
+	error=$connectionFail
+fi
+
+if [ "$error" != "" ]; then
+	echo "Error: $error" >&2
+fi
+
+exit 0
+
+#get files in a variable and go back to original directory that we started in
+list=`ls`
+cd $path
 num_files=0
 
-for file in $files; do
-	cp $2/$file $2/$file.bak
-	$path/manipulator.pl $1 < $2/$file > $2/$file.new
-	result=`cat $2/$file.new`
+#loop through list of files perform manipulations of each file
+for file in $list; do
+	cp $2/$file $2/$file.bak #make backup
+	$path/manipulator.pl $1 < $2/$file > $2/$file.new #manipulate file and put it at $file.new
+	result=`cat $2/$file.new` #get what's in the
 	if [ "$result" != "" ]; then
 		num_files=$num_files+1
 		rm $2/$file
@@ -110,11 +160,12 @@ for file in $files; do
 	fi
 done
 
-cd $2
+#go back to directory with downloaded and edited files in it and upload the new files
+cd ${conf_values['local_directory']}
 $protocol -inv $host <<EOF >> $ftp_out_file 2>>ftp_error_file
 user $user $pass
-cd testing
-mput *.asp
+cd cd ${conf_values['remote_directory']}
+mput $files $file
 bye
 EOF
 cd ..
