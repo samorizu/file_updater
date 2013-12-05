@@ -25,8 +25,11 @@ fi
 
 handleFiles(){
 	if test -f $1.bak; then
-		handleFiles $1.bak
+		if test -f $1.bak.bak; then
+			handleFiles $1.bak
+		fi
 	fi
+	/bin/cp $1 $1.bak
 }
 
 path=`/bin/pwd`
@@ -161,8 +164,10 @@ num_files=0
 
 #loop through list of files perform manipulations of each file
 for file in $list; do
+	if [[ "$file" =~ ".bak" ]]; then
+		continue
+	fi
 	handleFiles $file
-	/bin/cp $file $file.bak #make backup
 	$path/manipulator.pl $path/${conf_values['changes_file']} < $file > $file.new #manipulate file and put it at $file.new
 	result=`/bin/cat $file.new` #get what's in the newly manipulated file
 	if [ "$result" != "" ]; then
@@ -188,7 +193,7 @@ EOF
 if [ $num_files -gt 0 ]; then
 	echo "All eligible files were uploaded successfully."
 else
-	echo "No files were copied. Maybe none of them met the criterion." 1>&2
+	echo "No files were successfully altered. Maybe none of them met the criterion." 1>&2
 	exit 1
 fi
 
