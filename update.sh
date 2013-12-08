@@ -1,5 +1,5 @@
 #!/bin/bash
-#Authors: Jackson Sadowski and Luke Matarazzo
+#Authors: Luke Matarazzo and Jackson Sadowski
 #Purpose: Grab files via SFTP or FTP, update them the way the user defines, and reupload them
 
 if [ "$1" == "--help" -o "$1" == "-h" ]; then
@@ -54,17 +54,13 @@ while read line; do
 	val=`/bin/echo $line | awk -F"=" '{print $2}'`
 	if [ "$key" == "files" ]; then
 		((files_wanted++))
-		#conf_values=([$key$files_wanted]="$val")
 		conf_values[$key$files_wanted]="$val"
-		#echo "${conf_values[$key$files_wanted]}"
 	elif [ "$key" == "file" ]; then
 		((file_wanted++))
 		conf_values[$key$file_wanted]="$val"
 	else
 		temp="$key"
-		#conf_values=([$key]="$val")
 		conf_values[$key]="$val"
-		#echo "${conf_values[$key]}"
 	fi
 done < $1
 
@@ -76,14 +72,6 @@ fi
 #echo "files wanted: $files_wanted"
 #echo "value of local_directory: ${conf_values[local_directory]}"
 # echo "value of changes_file: ${conf_values['changes_file']}"
-
-#declare -a myKeys
-# for key in ${!conf_values[*]}; do
-# 	#myKeys=("$myKeys" "$key")
-# 	echo "value for $key: ${conf_values[$key]}"
-# done
-
-#exit 0
 
 for param in $@; do
 	if [ ${param:0:1} == "-" ]; then
@@ -98,46 +86,54 @@ fi
 
 cd ${conf_values['local_directory']}
 
-read -p "FTP host (example ftp.server.com): " host
-read -p "FTP user: " user
-read -s -p "FTP password: " pass
-echo #get a newline after printing ftp password prompt
+read -p "Host (example ftp.server.com): " host
+read -p "User: " user
+pass=""
 
-#get the files we want to get into two separate strings
+#get the files we want to get into one string
 files=""
-file=""
+
 for (( i = 1; i <= $files_wanted; i++ )); do
 	files+="${conf_values["files$i"]} "
-	#echo "files: ${conf_values["files$i"]}"
 done
-#echo "files: '$files'"
 for (( i = 1; i <= $file_wanted; i++ )); do
-	file+="${conf_values["file$i"]} "
-	#echo "file: ${conf_values["file$i"]}"
+	files+="${conf_values["file$i"]} "
 done
-#echo "file: '$file'"
 
-if [ "$files" == "" -a "$file" == "" ]; then
+if [ "$files" == "" ]; then
 	echo "You have not entered any files you want to download"
 	exit 1
 fi
 
-if [ "$ftp_option" == "f" ]; then
+if [ "$ftp_option" == "f" ]; then #ftp
+	# read -s -p "FTP password: " pass #prompt for password
+	read -s -p "Password: " pass #prompt for password
+	echo #put a newline after the password prompt
 	ftp -inv $host <<EOF >$ftp_out_file 2>$ftp_error_file
 user $user $pass
 cd ${conf_values['remote_directory']}
-mget $files $file
+mget $files
 bye
 EOF
-else
-	echo "sftp not yet implemented"
-	exit 0
-# 	sftp -inv $host <<EOF >>$ftp_out_file 2>>$ftp_error_file
-# user $user $pass
-# cd ${conf_values['remote_directory']}
-# mget $files $file
-# bye
-# EOF
+else #sftp
+	# sftp -oBatchMode=no -b - $user@$host <<EOF >$ftp_out_file 2>$ftp_error_file
+	# export SSHPASS="$pass"
+	# sshpass -p $pass sftp $user@$host:testing/about.asp
+	sftp -oBatchMode=no -b - $user@$host <<EOF >$ftp_out_file 2>$ftp_error_file
+cd ${conf_values['remote_directory']}
+mget $files
+bye
+EOF
+	# spawn sftp $user@$host
+	# expect "?assword"
+	# send "$pass\n"
+	# expect "sftp>"
+	# send "cd ${conf_values['remote_directory']}"
+	# expect "sftp>"
+	# send "mget $files"
+	# expect "sftp>"
+	# send "bye\n"
+	# interact
 fi
 
 loginFail=`/bin/grep -i "Login failed" $ftp_out_file`
@@ -155,7 +151,7 @@ if [ "$error" != "" ]; then
 	exit $status
 fi
 
-#exit 0
+# exit 0
 
 #get files in a variable and go back to original directory that we started in
 list=`/bin/ls`
@@ -180,15 +176,22 @@ for file in $list; do
 	fi
 done
 
-#go back to directory with downloaded and edited files in it and upload the new files
 #cd ${conf_values['local_directory']}
-ftp -inv $host <<EOF >> $ftp_out_file 2>>$ftp_error_file
+#upload new files
+if [ "$ftp_option" == "f" ]; then #ftp
+	ftp -inv $host <<EOF >>$ftp_out_file 2>>$ftp_error_file
 user $user $pass
 cd ${conf_values['remote_directory']}
-mput $files $file
+mput $files
 bye
 EOF
-#cd ..
+else #sftp
+	sftp -oBatchMode=no -b - $user@$host <<EOF >>$ftp_out_file 2>>$ftp_error_file
+cd ${conf_values['remote_directory']}
+mput $files
+bye
+EOF
+fi
 
 if [ $num_files -gt 0 ]; then
 	echo "All eligible files were uploaded successfully."
@@ -197,7 +200,9 @@ else
 	exit 1
 fi
 
-exit 0
+#exit 0
+
+filesToRevert=""
 
 read -p "Would you like to revert all or some files (A/S/N): " choice
 choice=`echo $choice | tr '[:lower:]' '[:upper:]'`
@@ -207,6 +212,7 @@ if [ "$choice" = "A" -o "$choice" = "ALL" ]; then
 			/bin/mv $file.bak $file
 		fi
 	done
+	filesToRevert="$files"
 elif [ "$choice" = "S" -o "$choice" = "SOME" ]; then
 	for file in $files; do
 		if test -e $file.bak; then
@@ -214,21 +220,27 @@ elif [ "$choice" = "S" -o "$choice" = "SOME" ]; then
 			choice=`echo $choice | tr '[:lower:]' '[:upper:]'`
 			if [ "$choice" = "Y" -o "$choice" = "YES" ]; then
 				/bin/mv $file.bak $file
+				filesToRevert+="$file "
 			fi
 		fi
 	done
 fi
 
-#cd $2
-files=`/bin/echo *.rev`
-for file in $files; do
-	$protocol -inv $host <<EOF
-	user $user $pass
-	cd testing
-	put $file ${file:0:${#file}-4}
-	bye
+if [ "$filesToRevert" != "" ]; then
+	if [ "$ftp_option" == "f" ]; then #ftp
+		ftp -inv $host <<EOF >> $ftp_out_file 2>>$ftp_error_file
+user $user $pass
+cd ${conf_values['remote_directory']}
+mput $filesToRevert
+bye
 EOF
-done >> $ftp_out_file 2>>ftp_error_file
-#cd ..
+	else #sftp
+		sftp -oBatchMode=no -b - $user@$host <<EOF >>$ftp_out_file 2>>$ftp_error_file
+cd ${conf_values['remote_directory']}
+mput $filesToRevert
+bye
+EOF
+	fi
+fi
 
 echo "All reverted files uploaded successfully."
