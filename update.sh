@@ -13,16 +13,42 @@ if [ "$1" == "--help" -o "$1" == "-h" ]; then
 	echo "-q, --quiet -	Enables quiet mode and prints very minimal output."
 	echo
 	echo "Exiting with a status of 1 usually means a general error, such as bad/missing arguments"
-	echo "Exiting with a status of 2 means there was an ftp login error, exiting with a status of 3 means there was an ftp"
-	echo "connection error."
+	echo "Exiting with a status of 2 means there was a login error, exiting with a status of 3 means there was a"
+	echo "connection error, and exiting with a status of 4 means one or more files or directories did not exist on the"
+	echo "remote file server."
 	exit 0
 fi
 
-if [ $# -lt 1 ]; then
+if [ $# -lt 1 ]; then #check for proper number of command line arguments
   echo "Usage: ./update.sh [CONFIGFILE] [options]"
   exit 1
 fi
 
+#find option, figure out whether it's f or s and store in variable
+counter=0 #counter
+for param in $@; do
+	counter+=1
+	if [ ${param:0:1} == "-" ]; then
+		ftp_option=${param:1:1}
+		if [ 1 -eq $counter ]; then
+			shift
+		fi
+		break
+	fi
+done
+
+if [ $# -lt 1 ]; then #check for proper number of command line arguments
+  echo "Usage: ./update.sh [options] [CONFIGFILE] [options]"
+  exit 1
+fi
+
+if test ! -e $1; then #make sure given config file exists
+	echo "Please enter a configuration file that exists"
+	exit 1
+fi
+
+#function to handle backup files so that nothing is overwritten and an additional .bak is appended to previously
+#existing backup files
 handleFiles(){
 	if test -f $1.bak; then
 		if test -f $1.bak.bak; then
@@ -32,6 +58,7 @@ handleFiles(){
 	/bin/cp $1 $1.bak
 }
 
+#set some variables used in the program
 path=`/bin/pwd`
 ftp_out_file="$path/.file_updater_ftp_output.log"
 ftp_error_file="$path/.file_updater_ftp_error.log"
@@ -64,35 +91,24 @@ while read line; do
 	fi
 done < $1
 
-if test ! -e ${conf_values['changes_file']}; then
+if test ! -e ${conf_values['changes_file']}; then #check if given changes file exists
 	echo "Please enter a changes file that exists"
 	exit 1
 fi
 
-#echo "files wanted: $files_wanted"
-#echo "value of local_directory: ${conf_values[local_directory]}"
-# echo "value of changes_file: ${conf_values['changes_file']}"
-
-for param in $@; do
-	if [ ${param:0:1} == "-" ]; then
-		ftp_option=${param:1:1}
-		break
-	fi
-done
-
-if test ! -d ${conf_values['local_directory']}; then
+if test ! -d ${conf_values['local_directory']}; then #check if local directory given exists
 	/bin/mkdir ${conf_values['local_directory']}
 fi
 
 cd ${conf_values['local_directory']}
 
+#prompt for user and server info
 read -p "Host (example ftp.server.com): " host
 read -p "User: " user
 pass=""
 
 #get the files we want to get into one string
 files=""
-
 for (( i = 1; i <= $files_wanted; i++ )); do
 	files+="${conf_values["files$i"]} "
 done
@@ -100,7 +116,7 @@ for (( i = 1; i <= $file_wanted; i++ )); do
 	files+="${conf_values["file$i"]} "
 done
 
-if [ "$files" == "" ]; then
+if [ "$files" == "" ]; then #if they didn't give any files to change/download, print error and quit
 	echo "You have not entered any files you want to download"
 	exit 1
 fi
@@ -115,6 +131,7 @@ cd ${conf_values['remote_directory']}
 mget $files
 bye
 EOF
+	otherFail=`/bin/grep -i "550" $ftp_out_file` #check if file or directory was missing
 else #sftp
 	# sftp -oBatchMode=no -b - $user@$host <<EOF >$ftp_out_file 2>$ftp_error_file
 	# export SSHPASS="$pass"
@@ -134,28 +151,32 @@ EOF
 	# expect "sftp>"
 	# send "bye\n"
 	# interact
+	otherFail=`/bin/grep -i "no such" $ftp_out_file` #check if file or directory was missing
 fi
 
+#check for errors
 loginFail=`/bin/grep -i "Login failed" $ftp_out_file`
 error=$loginFail
 status=2
 connectionFail=`/bin/grep -i "connection timed out" $ftp_error_file`
 
-if [ "$connectionFail" != "" ]; then
+if [ "$connectionFail" != "" ]; then #check for connection failure
 	error=$connectionFail
 	status=3
+elif [ "$otherFail" != "" ]; then #check for missing file or directory error
+	error=$otherFail
+	status=4
 fi
 
-if [ "$error" != "" ]; then
+if [ "$error" != "" ]; then #if there was an ftp error, print error message and exit
 	echo "Error: $error" >&2
 	exit $status
 fi
 
-# exit 0
+echo "Files successfully downloaded from server." #print success message
 
 #get files in a variable and go back to original directory that we started in
 list=`/bin/ls`
-#cd $path
 num_files=0
 
 #loop through list of files perform manipulations of each file
@@ -176,7 +197,8 @@ for file in $list; do
 	fi
 done
 
-#cd ${conf_values['local_directory']}
+exit 0
+
 #upload new files
 if [ "$ftp_option" == "f" ]; then #ftp
 	ftp -inv $host <<EOF >>$ftp_out_file 2>>$ftp_error_file
@@ -193,14 +215,28 @@ bye
 EOF
 fi
 
+#check for errors
+loginFail=`/bin/grep -i "Login failed" $ftp_out_file`
+error=$loginFail
+status=2
+connectionFail=`/bin/grep -i "connection timed out" $ftp_error_file`
+
+if [ "$connectionFail" != "" ]; then #check for connection failure
+	error=$connectionFail
+	status=3
+fi
+
+if [ "$error" != "" ]; then #if there was an ftp error, print error message and exit
+	echo "Error: $error" >&2
+	exit $status
+fi
+
 if [ $num_files -gt 0 ]; then
 	echo "All eligible files were uploaded successfully."
 else
 	echo "No files were successfully altered. Maybe none of them met the criterion." 1>&2
 	exit 1
 fi
-
-#exit 0
 
 filesToRevert=""
 
@@ -241,6 +277,22 @@ mput $filesToRevert
 bye
 EOF
 	fi
+fi
+
+#check for errors
+loginFail=`/bin/grep -i "Login failed" $ftp_out_file`
+error=$loginFail
+status=2
+connectionFail=`/bin/grep -i "connection timed out" $ftp_error_file`
+
+if [ "$connectionFail" != "" ]; then #check for connection failure
+	error=$connectionFail
+	status=3
+fi
+
+if [ "$error" != "" ]; then #if there was an ftp error, print error message and exit
+	echo "Error: $error" >&2
+	exit $status
 fi
 
 echo "All reverted files uploaded successfully."
