@@ -197,8 +197,6 @@ for file in $list; do
 	fi
 done
 
-exit 0
-
 #upload new files
 if [ "$ftp_option" == "f" ]; then #ftp
 	ftp -inv $host <<EOF >>$ftp_out_file 2>>$ftp_error_file
@@ -238,18 +236,18 @@ else
 	exit 1
 fi
 
+#ask if user wants to revert some or all of files. if some, figure out which
 filesToRevert=""
-
 read -p "Would you like to revert all or some files (A/S/N): " choice
 choice=`echo $choice | tr '[:lower:]' '[:upper:]'`
-if [ "$choice" = "A" -o "$choice" = "ALL" ]; then
+if [ "$choice" = "A" -o "$choice" = "ALL" ]; then #revert all
 	for file in $files; do
 		if test -e $file.bak; then
 			/bin/mv $file.bak $file
 		fi
 	done
 	filesToRevert="$files"
-elif [ "$choice" = "S" -o "$choice" = "SOME" ]; then
+elif [ "$choice" = "S" -o "$choice" = "SOME" ]; then #revert some
 	for file in $files; do
 		if test -e $file.bak; then
 			read -p "Would you like to revert $file (Y/N): " choice
@@ -262,6 +260,7 @@ elif [ "$choice" = "S" -o "$choice" = "SOME" ]; then
 	done
 fi
 
+#upload reverted files
 if [ "$filesToRevert" != "" ]; then
 	if [ "$ftp_option" == "f" ]; then #ftp
 		ftp -inv $host <<EOF >> $ftp_out_file 2>>$ftp_error_file
@@ -295,4 +294,4 @@ if [ "$error" != "" ]; then #if there was an ftp error, print error message and 
 	exit $status
 fi
 
-echo "All reverted files uploaded successfully."
+echo "All reverted files uploaded successfully." #print success message
