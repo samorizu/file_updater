@@ -45,6 +45,7 @@ getValue(){
 getPassword(){
 	read -s -p "Enter password: " tempVal #prompt for value
 	while [ "$tempVal" == "" ]; do #if not given, prompt again
+		echo >&2
 		echo "You cannot leave this value blank..." >&2
 		read -s -p "Enter password: " tempVal
 	done
@@ -203,7 +204,7 @@ for file in $list; do
 	$path/manipulator.pl $path/${conf_values['changes_file']} < $file > $file.new #manipulate file and put it at $file.new
 	result=`/bin/cat $file.new` #get what's in the newly manipulated file
 	if [ "$result" != "" ]; then
-		num_files+=1
+		((num_files++))
 		/bin/rm $file
 		/bin/mv $file.new $file
 	else
@@ -221,6 +222,7 @@ mput $files
 bye
 EOF
 else #sftp
+	echo "Attempting to upload files to server..."
 	sftp -oBatchMode=no -b - $user@$host <<EOF >>$ftp_out_file 2>>$ftp_error_file
 cd ${conf_values['remote_directory']}
 mput $files
@@ -291,22 +293,24 @@ mput $filesToRevert
 bye
 EOF
 	fi
+
+	#check for errors
+	loginFail=`/bin/grep -i "Login failed" $ftp_out_file`
+	error=$loginFail
+	status=2
+	connectionFail=`/bin/grep -i "connection timed out" $ftp_error_file`
+
+	if [ "$connectionFail" != "" ]; then #check for connection failure
+		error=$connectionFail
+		status=3
+	fi
+
+	if [ "$error" != "" ]; then #if there was an ftp error, print error message and exit
+		echo "Error: $error" >&2
+		exit $status
+	fi
+
+	echo "All reverted files uploaded successfully." #print success message
 fi
 
-#check for errors
-loginFail=`/bin/grep -i "Login failed" $ftp_out_file`
-error=$loginFail
-status=2
-connectionFail=`/bin/grep -i "connection timed out" $ftp_error_file`
 
-if [ "$connectionFail" != "" ]; then #check for connection failure
-	error=$connectionFail
-	status=3
-fi
-
-if [ "$error" != "" ]; then #if there was an ftp error, print error message and exit
-	echo "Error: $error" >&2
-	exit $status
-fi
-
-echo "All reverted files uploaded successfully." #print success message
