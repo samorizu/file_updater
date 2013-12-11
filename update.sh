@@ -3,14 +3,11 @@
 #Purpose: Grab files via SFTP or FTP, update them the way the user defines, and reupload them
 
 if [ "$1" == "--help" -o "$1" == "-h" ]; then
-	# echo "CONFIGFILE - File with the text to be found, a tilde (~) on a line by itself and then the changes (temporary)."
 	echo "Sample usage: ./update.sh [options] [CONFIGFILE] [options]"
 	echo "CONFIGFILE - Text file containing configuration for this script. Sample default configuration file provided as file_updater.conf"
-	echo "[DIRECTORY_OF_FILES] - Directory in which the files to be updated are (temporary)."
 	echo
 	echo "-h, --help - 	Prints this help information."
 	echo "-f - 		Specifies the use of FTP rather than SFTP. SFTP is the default protocol for this program."
-	#echo "-q, --quiet -	Enables quiet mode and prints very minimal output."
 	echo
 	echo "Exiting with a status of 1 usually means a general error, such as bad/missing arguments"
 	echo "Exiting with a status of 2 means there was a login error, exiting with a status of 3 means there was a"
@@ -72,7 +69,7 @@ if [ $# -ge 1 ]; then
 	#find option, figure out whether it's f or s and store in variable
 	counter=0 #counter
 	for param in $@; do
-		counter+=1
+		((counter++))
 		if [ ${param:0:1} == "-" ]; then
 			ftp_option=${param:1:1}
 			if [ 1 -eq $counter ]; then
@@ -312,5 +309,3 @@ EOF
 
 	echo "All reverted files uploaded successfully." #print success message
 fi
-
-
