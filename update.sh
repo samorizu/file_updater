@@ -63,6 +63,7 @@ declare -A conf_values
 files_wanted=0
 file_wanted=0
 files=""
+filesBackup=""
 
 #if there are command line arguments, find ftp option if given
 if [ $# -ge 1 ]; then
@@ -123,6 +124,8 @@ else #they did not enter any command line arguments so no config file, prompt fo
 	done
 fi
 
+#create list of files backup
+filesBackup="$files"
 
 if [ "$files" == "" ]; then #if they didn't give any files to change/download, print error and quit
 	echo "You have not entered any files you want to download"
@@ -178,6 +181,7 @@ if [ "$connectionFail" != "" ]; then #check for connection failure
 	status=3
 elif [ "$otherFail" != "" ]; then #check for missing file or directory error
 	error=$otherFail
+	rm $files
 	status=4
 fi
 
@@ -212,12 +216,32 @@ done
 
 #upload new files
 if [ "$ftp_option" == "f" ]; then #ftp
-	ftp -inv $host <<EOF >>$ftp_out_file 2>>$ftp_error_file
+failedFile="not empty"
+while [ "$failedFile" != "" ]; do #loop through uploading until there is no connection error when doing so
+		ftp -inv $host <<EOF >>$ftp_out_file 2>>$ftp_error_file
 user $user $pass
 cd ${conf_values['remote_directory']}
 mput $files
 bye
 EOF
+	line=`grep 421 $ftp_out_file -n | grep -P "\d:" -o | awk 'sub(":", x)'` #find if there was a connection error when uploading
+	if [ "$line" != "" ]; then #if we detect disconnection error
+		((line--)) #decrement to get the line before the disconnect happened
+		failedFile=`head -$line ../.file_updater_ftp_output.log | tail -1 | grep -P -o "\w+\.\w+$"`
+		temp=""
+		for file in $files; do #loop through and recreate files list
+			if [ "$failedFile" == "$file" ]; then #if the file equals the failed file, add it to the files list
+				temp="$file"
+			fi
+			if [ "$temp" != "" ]; then #dont add anything until there is an initial value
+				temp+=" $file"
+			fi
+			files="$temp" #set the files var to our new list of files
+		done
+	else
+		failedFile="" #set failedFile to null so we don't loop to upload again
+	fi
+done
 else #sftp
 	echo "Attempting to upload files to server..."
 	sftp -oBatchMode=no -b - $user@$host <<EOF >>$ftp_out_file 2>>$ftp_error_file
@@ -249,6 +273,9 @@ else
 	echo "No files were successfully altered. Maybe none of them met the criterion." 1>&2
 	exit 1
 fi
+
+#set files to original backup
+files="$filesBackup"
 
 #ask if user wants to revert some or all of files. if some, figure out which
 filesToRevert=""
