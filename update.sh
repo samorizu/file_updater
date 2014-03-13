@@ -160,7 +160,11 @@ cd ${conf_values['remote_directory']}
 mget $files
 bye
 EOF
-	otherFail=`/bin/grep -i "550" $ftp_out_file` #check if file or directory was missing
+	otherFail=`/bin/grep -iw "550" $ftp_out_file` #check if file or directory was missing
+	temp=`echo $otherFail | /bin/grep -i "byte"` #check if it was just telling us about file transfer
+	if [ "$temp" != "" ]; then
+		otherFail=""
+	fi
 else #sftp
 	sftp -oBatchMode=no -b - $user@$host <<EOF >$ftp_out_file 2>$ftp_error_file
 cd ${conf_values['remote_directory']}
@@ -224,10 +228,21 @@ cd ${conf_values['remote_directory']}
 mput $files
 bye
 EOF
-	line=`grep 421 $ftp_out_file -n | grep -P "\d:" -o | awk 'sub(":", x)'` #find if there was a connection error when uploading
-	if [ "$line" != "" ]; then #if we detect disconnection error
+	# temp=`grep -w 421 $ftp_out_file -n | grep -P "\d:" -o | awk 'sub(":", x)'` #find if there was a connection error when uploading
+	temp=`grep -w 421 $ftp_out_file -n` #find if there was a connection error when uploading
+	keepGoing="YES"
+	if [[ $temp == *\n* ]]; then #more than one line returned during our first grep. not good! must fix
+		tempFile=".file_updater_error.temp"
+		echo "$temp" > $tempFile
+		temp=`grep -vi "byte" $tempFile`
+		if [[ $temp == *\n* ]]; then #still has more than one line...that's bad!
+			keepGoing="NO"
+		fi
+	fi
+	line=`echo $temp | grep -P "\d:" -o | awk 'sub(":", x)'`
+	if [ "$keepGoing" != "NO" -a "$line" != "" ]; then #if we detect disconnection error
 		((line--)) #decrement to get the line before the disconnect happened
-		failedFile=`head -$line ../.file_updater_ftp_output.log | tail -1 | grep -P -o "\w+\.\w+$"`
+		failedFile=`head -$line $ftp_out_file | tail -1 | grep -P -o "\w+\.\w+$"`
 		temp=""
 		for file in $files; do #loop through and recreate files list
 			if [ "$failedFile" == "$file" ]; then #if the file equals the failed file, add it to the files list
